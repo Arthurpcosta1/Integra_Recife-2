@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Plus, Calendar, MapPin, Clock, Image as ImageIcon, Tag, FileText, Users, LayoutDashboard } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Calendar, MapPin, Clock, Image as ImageIcon, Tag, FileText, Users, LayoutDashboard, RefreshCw } from 'lucide-react';
 import { UserManagement } from './UserManagement';
+import { supabase } from '../utils/supabase/info';
+import { toast } from 'sonner@2.0.3';
 
 interface Event {
   id: number;
@@ -28,6 +30,8 @@ type AdminTab = 'eventos' | 'usuarios';
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ events, onAddEvent, onDeleteEvent, accessToken }) => {
   const [showForm, setShowForm] = useState(false);
   const [activeTab, setActiveTab] = useState<AdminTab>('eventos');
+  const [dbEvents, setDbEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     date: '',
@@ -38,6 +42,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ events, onAddEve
     description: ''
   });
 
+  // Carregar eventos do banco ao montar
+  useEffect(() => {
+    loadEventsFromDatabase();
+  }, []);
+
+  const loadEventsFromDatabase = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('eventos')
+        .select('*')
+        .order('data_inicio', { ascending: true });
+
+      if (error) {
+        console.error('Erro ao carregar eventos:', error);
+        toast.error('Erro ao carregar eventos do banco');
+      } else if (data) {
+        setDbEvents(data);
+        console.log('✅ Eventos carregados do banco:', data.length);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar eventos:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const categories = [
     { name: 'Música', color: '#e48e2c' },
     { name: 'Teatro', color: '#b31a4d' },
@@ -47,7 +78,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ events, onAddEve
     { name: 'Arte', color: '#8e44ad' }
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.title || !formData.date || !formData.time || !formData.location || !formData.description) {
@@ -57,30 +88,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ events, onAddEve
 
     const selectedCategory = categories.find(c => c.name === formData.category);
     
-    onAddEvent({
-      title: formData.title,
-      date: formData.date,
-      time: formData.time,
-      location: formData.location,
-      image: formData.image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
-      category: formData.category,
-      categoryColor: selectedCategory?.color || '#e48e2c',
-      description: formData.description,
-      liked: false
-    });
-
-    // Reset form
-    setFormData({
-      title: '',
-      date: '',
-      time: '',
-      location: '',
-      image: '',
-      category: 'Música',
-      description: ''
-    });
+    // Combinar data e hora no formato ISO
+    const dateTimeStr = `${formData.date}T${formData.time}:00`;
     
-    setShowForm(false);
+    try {
+      // Salvar no banco de dados
+      const { data: dbEvent, error } = await supabase
+        .from('eventos')
+        .insert({
+          titulo: formData.title,
+          descricao: formData.description,
+          data_inicio: dateTimeStr,
+          data_fim: dateTimeStr,
+          localizacao: formData.location,
+          categoria: formData.category,
+          cor_categoria: selectedCategory?.color || '#e48e2c',
+          imagem: formData.image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
+          status: 'ativo',
+          capacidade: 1000,
+          preco: 0,
+          destaque: false
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Erro ao salvar evento:', error);
+        toast.error('Erro ao salvar evento no banco de dados');
+        return;
+      }
+
+      console.log('✅ Evento salvo no banco:', dbEvent);
+      toast.success('Evento criado com sucesso!');
+
+      // Recarregar eventos do banco
+      await loadEventsFromDatabase();
+
+      // Atualizar estado do App.tsx
+      onAddEvent({
+        title: formData.title,
+        date: formData.date,
+        time: formData.time,
+        location: formData.location,
+        image: formData.image || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
+        category: formData.category,
+        categoryColor: selectedCategory?.color || '#e48e2c',
+        description: formData.description,
+        liked: false
+      });
+
+      // Reset form
+      setFormData({
+        title: '',
+        date: '',
+        time: '',
+        location: '',
+        image: '',
+        category: 'Música',
+        description: ''
+      });
+      
+      setShowForm(false);
+    } catch (error) {
+      console.error('❌ Erro ao criar evento:', error);
+      toast.error('Erro ao criar evento');
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {

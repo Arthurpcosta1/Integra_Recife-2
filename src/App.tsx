@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MainScreen } from './components/MainScreen';
 import { EventDetailScreen } from './components/EventDetailScreen';
 import { ToursScreen } from './components/ToursScreen';
@@ -8,20 +8,21 @@ import { ProfileScreen } from './components/ProfileScreen';
 import { LoginScreen } from './components/LoginScreen';
 import { AdminDashboard } from './components/AdminDashboard';
 import { ChatForum } from './components/ChatForum';
-import { ReportsScreen } from './components/ReportsScreen';
-import { ProjectsModule } from './components/ProjectsModule';
+import { ProjectsModuleEnhanced } from './components/ProjectsModuleEnhanced';
 import { NotificationSystem } from './components/NotificationSystem';
 import { CalendarScreen } from './components/CalendarScreen';
 import { ManagerialReports } from './components/ManagerialReports';
 import { Toaster } from './components/ui/sonner';
 import { Calendar, MapPin, Heart, User, Menu, X, LogOut, Settings, MessageSquare, BarChart3, Folder, Database, FileText } from 'lucide-react';
 import { DatabaseSetup } from './components/DatabaseSetup';
+import { supabase } from './utils/supabase/info';
+import { getOrCreateUUID } from './utils/uuid';
 
 type Screen = 'main' | 'eventDetail' | 'tours' | 'tourDetail' | 'profile' | 'admin' | 'chat' | 'reports' | 'projects' | 'database' | 'calendar' | 'managerialReports';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentUser, setCurrentUser] = useState<{ email: string; name: string; type: 'admin' | 'cidadao'; accessToken?: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name: string; type: 'admin' | 'cidadao'; accessToken?: string } | null>(null);
   const [currentScreen, setCurrentScreen] = useState<Screen>('main');
   const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
   const [selectedTourId, setSelectedTourId] = useState<number | null>(null);
@@ -30,6 +31,60 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [nextEventId, setNextEventId] = useState(5);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
+
+  // Carregar eventos do banco de dados no início
+  useEffect(() => {
+    if (isAuthenticated && !eventsLoaded) {
+      loadEventsFromDatabase();
+    }
+  }, [isAuthenticated]);
+
+  const loadEventsFromDatabase = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('eventos')
+        .select('*')
+        .order('data_inicio', { ascending: true });
+
+      if (data && data.length > 0) {
+        console.log('✅ Eventos carregados do banco:', data.length);
+        
+        // Converter eventos do banco para o formato local
+        const formattedEvents = data.map((dbEvent: any) => {
+          const eventDate = new Date(dbEvent.data_inicio);
+          return {
+            id: dbEvent.id,
+            title: dbEvent.titulo,
+            date: eventDate.toLocaleDateString('pt-BR', { 
+              day: 'numeric', 
+              month: 'long', 
+              year: 'numeric' 
+            }).replace(' de ', ' de '),
+            time: eventDate.toLocaleTimeString('pt-BR', { 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            }),
+            location: dbEvent.localizacao,
+            image: dbEvent.imagem || 'https://images.unsplash.com/photo-1540575467063-178a50c2df87?w=800',
+            category: dbEvent.categoria,
+            categoryColor: dbEvent.cor_categoria || '#e48e2c',
+            liked: false,
+            description: dbEvent.descricao,
+            rating: 0,
+            reviewCount: 0
+          };
+        });
+        
+        // Atualizar o estado de eventos com os do banco
+        setEvents(formattedEvents);
+        setEventsLoaded(true);
+        console.log('✅ Estado de eventos atualizado com dados do banco');
+      }
+    } catch (error) {
+      console.error('Erro ao carregar eventos:', error);
+    }
+  };
 
   const [events, setEvents] = useState([
     {
@@ -90,7 +145,83 @@ export default function App() {
     }
   ]);
 
-  const [tours, setTours] = useState([
+  // Estado de roteiros turísticos
+  const [tours, setTours] = useState<any[]>([]);
+  const [toursLoaded, setToursLoaded] = useState(false);
+
+  // Carregar roteiros do banco de dados
+  useEffect(() => {
+    if (isAuthenticated && !toursLoaded) {
+      loadToursFromDatabase();
+    }
+  }, [isAuthenticated]);
+
+  const loadToursFromDatabase = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('roteiros_turisticos')
+        .select('*')
+        .eq('status', 'publicado')
+        .order('criado_em', { ascending: false });
+
+      if (data && data.length > 0) {
+        const formattedTours = data.map((tour: any) => ({
+          id: tour.id,
+          title: tour.titulo,
+          description: tour.descricao,
+          fullDescription: tour.descricao_completa,
+          duration: tour.duracao_estimada,
+          image: tour.imagem || 'https://images.unsplash.com/photo-1661721097539-44f58bb849d8?w=800',
+          pointsOfInterest: tour.numero_pontos || 0,
+          views: tour.visualizacoes || 0,
+          points: [] // Will be loaded when viewing details
+        }));
+        
+        setTours(formattedTours);
+        setToursLoaded(true);
+        console.log('✅ Roteiros carregados do banco:', formattedTours.length);
+      } else {
+        // Se não houver roteiros, inicializar com array vazio
+        setTours([]);
+        setToursLoaded(true);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar roteiros:', error);
+      setTours([]);
+      setToursLoaded(true);
+    }
+  };
+
+  // Função para carregar pontos de interesse de um roteiro específico
+  const loadTourPoints = async (tourId: number) => {
+    try {
+      const { data, error } = await supabase
+        .from('pontos_interesse')
+        .select('*')
+        .eq('roteiro_id', tourId)
+        .order('ordem', { ascending: true });
+
+      if (data) {
+        return data.map((point: any) => ({
+          id: point.id,
+          name: point.nome,
+          description: point.descricao,
+          image: point.imagem || 'https://images.unsplash.com/photo-1661721097539-44f58bb849d8?w=800',
+          order: point.ordem,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          endereco: point.endereco
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Erro ao carregar pontos do roteiro:', error);
+      return [];
+    }
+  };
+
+  // Dados mockados para compatibilidade (caso o banco esteja vazio)
+  const mockTours = [
     {
       id: 1,
       title: "Roteiro das Pontes do Recife",
@@ -197,10 +328,65 @@ export default function App() {
         }
       ]
     }
-  ]);
+  ];
 
-  const handleLogin = (userData: { email: string; name: string; type: 'admin' | 'cidadao'; accessToken?: string }) => {
-    setCurrentUser(userData);
+  const handleLogin = async (userData: { email: string; name: string; type: 'admin' | 'cidadao'; accessToken?: string }) => {
+    let userId = getOrCreateUUID(userData.email);
+    
+    // Validar e normalizar o tipo de usuário
+    let tipoUsuario: 'admin' | 'cidadao' = userData.type;
+    if (tipoUsuario !== 'admin' && tipoUsuario !== 'cidadao') {
+      console.warn(`⚠️ Tipo de usuário inválido: "${tipoUsuario}". Usando "cidadao" como padrão.`);
+      tipoUsuario = 'cidadao';
+    }
+    
+    try {
+      // Buscar usuário no banco
+      const { data, error } = await supabase
+        .from('usuarios')
+        .select('id')
+        .eq('email', userData.email)
+        .single();
+      
+      if (data && data.id) {
+        // Usuário existe, usar o UUID do banco
+        userId = data.id;
+        console.log('✅ Usuário encontrado no banco:', userId);
+      } else {
+        // Usuário não existe, criar no banco
+        console.log('⚠️ Usuário não encontrado, criando no banco...');
+        const { data: newUser, error: insertError } = await supabase
+          .from('usuarios')
+          .insert({
+            email: userData.email,
+            nome: userData.name,
+            tipo: tipoUsuario,
+            avatar: null,
+            telefone: null,
+            bio: null
+          })
+          .select('id')
+          .single();
+        
+        if (newUser && newUser.id) {
+          userId = newUser.id;
+          console.log('✅ Usuário criado no banco:', userId);
+        } else {
+          console.error('❌ Erro ao criar usuário:', insertError);
+          // Se falhar, usar UUID gerado localmente
+          console.log('⚠️ Usando UUID gerado localmente');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Erro ao buscar/criar usuário:', error);
+    }
+    
+    const userWithId = {
+      ...userData,
+      id: userId
+    };
+    
+    setCurrentUser(userWithId);
     setIsAuthenticated(true);
     if (userData.type === 'admin') {
       setCurrentScreen('admin');
@@ -215,16 +401,9 @@ export default function App() {
     setCurrentScreen('main');
   };
 
-  const handleAddEvent = (newEvent: Omit<typeof events[0], 'id' | 'rating' | 'reviewCount' | 'liked'>) => {
-    const event = {
-      ...newEvent,
-      id: nextEventId,
-      rating: 0,
-      reviewCount: 0,
-      liked: false
-    };
-    setEvents([...events, event]);
-    setNextEventId(nextEventId + 1);
+  const handleAddEvent = async (newEvent: Omit<typeof events[0], 'id' | 'rating' | 'reviewCount' | 'liked'>) => {
+    // Recarregar eventos do banco de dados para pegar o novo evento
+    await loadEventsFromDatabase();
   };
 
   const handleDeleteEvent = (eventId: number) => {
@@ -269,8 +448,17 @@ export default function App() {
     setCurrentScreen('eventDetail');
   };
 
-  const handleTourClick = (tourId: number) => {
+  const handleTourClick = async (tourId: number) => {
     setSelectedTourId(tourId);
+    
+    // Carregar pontos do roteiro antes de mostrar
+    const points = await loadTourPoints(tourId);
+    
+    // Atualizar o tour com os pontos
+    setTours(tours.map(tour => 
+      tour.id === tourId ? { ...tour, points } : tour
+    ));
+    
     setCurrentScreen('tourDetail');
   };
 
@@ -292,7 +480,7 @@ export default function App() {
 
     try {
       const ratingData = {
-        usuario_id: currentUser.email,
+        usuario_id: currentUser.id,
         usuario_nome: currentUser.name,
         evento_nome: ratingEventName,
         nota: rating,
@@ -360,7 +548,7 @@ export default function App() {
       <Toaster position="top-right" richColors />
       
       {/* Sistema de Notificações */}
-      <NotificationSystem currentUser={currentUser ? { id: currentUser.email, name: currentUser.name } : null} />
+      <NotificationSystem currentUser={currentUser ? { id: currentUser.id, name: currentUser.name } : null} />
       
       {/* Mobile Header */}
       <div className="mobile-header">
@@ -545,6 +733,8 @@ export default function App() {
           <ToursScreen 
             tours={tours}
             onTourClick={handleTourClick}
+            currentUser={currentUser}
+            onToursUpdate={setTours}
           />
         )}
 
@@ -555,9 +745,12 @@ export default function App() {
               title: selectedTour.title,
               duration: selectedTour.duration,
               description: selectedTour.fullDescription,
-              points: selectedTour.points
+              fullDescription: selectedTour.fullDescription,
+              points: selectedTour.points || []
             }}
             onBack={handleBack}
+            currentUser={currentUser}
+            onPointsUpdate={loadToursFromDatabase}
           />
         )}
 
@@ -577,7 +770,7 @@ export default function App() {
         {currentScreen === 'chat' && currentUser && (
           <ChatForum 
             currentUser={{
-              id: currentUser.email,
+              id: currentUser.id,
               name: currentUser.name,
               avatar: user.avatar
             }}
@@ -585,13 +778,17 @@ export default function App() {
         )}
 
         {currentScreen === 'reports' && currentUser?.type === 'admin' && (
-          <ReportsScreen events={events} />
+          <ManagerialReports events={events} />
+        )}
+
+        {currentScreen === 'managerialReports' && currentUser?.type === 'admin' && (
+          <ManagerialReports events={events} />
         )}
 
         {currentScreen === 'projects' && currentUser && (
-          <ProjectsModule 
+          <ProjectsModuleEnhanced 
             currentUser={{
-              id: currentUser.email,
+              id: currentUser.id,
               name: currentUser.name,
               type: currentUser.type
             }}
@@ -607,10 +804,6 @@ export default function App() {
             events={events}
             onEventClick={handleEventClick}
           />
-        )}
-
-        {currentScreen === 'managerialReports' && currentUser?.type === 'admin' && (
-          <ManagerialReports events={events} />
         )}
       </main>
 

@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Calendar as CalendarIcon, MapPin, Clock } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Calendar as CalendarIcon, MapPin, Clock, Loader2 } from 'lucide-react';
 import { Calendar } from './ui/calendar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Button } from './ui/button';
@@ -7,8 +7,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 import { Badge } from './ui/badge';
-import { format, isSameDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isWithinInterval, parseISO } from 'date-fns';
+import { format, isSameDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { supabase } from '../utils/supabase/info';
+import { toast } from 'sonner@2.0.3';
 
 interface Event {
   id: number;
@@ -37,11 +39,72 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
     to: undefined
   });
   const [customDateOpen, setCustomDateOpen] = useState(false);
+  const [dbEvents, setDbEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [usingDatabase, setUsingDatabase] = useState(false);
 
-  // Converter string de data para Date object
-  const parseEventDate = (dateStr: string): Date => {
-    // Formato esperado: "15 de Outubro, 2025"
+  // Carregar eventos do banco de dados
+  useEffect(() => {
+    loadEventsFromDatabase();
+  }, []);
+
+  // Recarregar eventos quando os eventos do props mudarem
+  useEffect(() => {
+    if (events.length > 0 && !usingDatabase) {
+      console.log('Eventos atualizados via props:', events.length);
+    }
+  }, [events]);
+
+  const loadEventsFromDatabase = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('eventos')
+        .select('*')
+        .order('data_inicio', { ascending: true });
+
+      if (error) {
+        console.log('Usando eventos locais (banco não disponível)');
+        setUsingDatabase(false);
+      } else if (data && data.length > 0) {
+        console.log('✅ Eventos carregados do banco:', data.length);
+        setDbEvents(data);
+        setUsingDatabase(true);
+        toast.success(`Calendário conectado! ${data.length} eventos encontrados`);
+      } else {
+        console.log('Nenhum evento no banco, usando locais');
+        setUsingDatabase(false);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar eventos:', error);
+      setUsingDatabase(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Converter string de data ou timestamp para Date object
+  const parseEventDate = (dateStr: string | Date): Date => {
+    // Se já é um Date, retornar
+    if (dateStr instanceof Date) {
+      return dateStr;
+    }
+
+    // Tentar formato ISO/timestamp primeiro (do banco de dados)
+    try {
+      const isoDate = parseISO(dateStr);
+      if (!isNaN(isoDate.getTime())) {
+        return isoDate;
+      }
+    } catch (e) {
+      // Continuar para outros formatos
+    }
+
+    // Formato: "15 de Outubro, 2025" ou "15 de outubro, 2025"
     const months: { [key: string]: number } = {
+      'janeiro': 0, 'fevereiro': 1, 'março': 2, 'abril': 3,
+      'maio': 4, 'junho': 5, 'julho': 6, 'agosto': 7,
+      'setembro': 8, 'outubro': 9, 'novembro': 10, 'dezembro': 11,
+      // Também aceitar maiúsculas
       'Janeiro': 0, 'Fevereiro': 1, 'Março': 2, 'Abril': 3,
       'Maio': 4, 'Junho': 5, 'Julho': 6, 'Agosto': 7,
       'Setembro': 8, 'Outubro': 9, 'Novembro': 10, 'Dezembro': 11
@@ -50,16 +113,61 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
     const parts = dateStr.split(' ');
     if (parts.length >= 4) {
       const day = parseInt(parts[0]);
-      const month = months[parts[2]];
-      const year = parseInt(parts[3]);
+      const monthName = parts[2].replace(',', '');
+      const month = months[monthName];
+      const year = parseInt(parts[3].replace(',', ''));
+      
+      if (!isNaN(day) && month !== undefined && !isNaN(year)) {
+        return new Date(year, month, day);
+      }
+    }
+
+    // Formato: "DD/MM/YYYY" ou "DD-MM-YYYY"
+    const dateRegex = /(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/;
+    const match = dateStr.match(dateRegex);
+    if (match) {
+      const day = parseInt(match[1]);
+      const month = parseInt(match[2]) - 1; // Meses em JS são 0-indexed
+      const year = parseInt(match[3]);
       return new Date(year, month, day);
     }
+
+    // Formato: "YYYY-MM-DD" (padrão do input date)
+    const isoRegex = /(\d{4})-(\d{1,2})-(\d{1,2})/;
+    const isoMatch = dateStr.match(isoRegex);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1]);
+      const month = parseInt(isoMatch[2]) - 1;
+      const day = parseInt(isoMatch[3]);
+      return new Date(year, month, day);
+    }
+
+    console.warn('Formato de data não reconhecido:', dateStr);
     return new Date();
   };
 
+  // Combinar eventos locais e do banco
+  const allEvents = useMemo(() => {
+    if (usingDatabase && dbEvents.length > 0) {
+      // Converter eventos do banco para o formato local
+      return dbEvents.map(dbEvent => ({
+        id: Math.floor(Math.random() * 100000),
+        title: dbEvent.titulo,
+        date: dbEvent.data_inicio,
+        time: format(parseISO(dbEvent.data_inicio), 'HH:mm'),
+        location: dbEvent.localizacao,
+        image: dbEvent.imagem || 'https://images.unsplash.com/photo-1672841821756-fc04525771c2',
+        category: dbEvent.categoria,
+        categoryColor: dbEvent.cor_categoria || '#e48e2c',
+        liked: false
+      }));
+    }
+    return events;
+  }, [events, dbEvents, usingDatabase]);
+
   // Filtrar eventos por tipo
   const filteredEvents = useMemo(() => {
-    let filtered = events;
+    let filtered = allEvents;
 
     // Filtro por tipo
     if (eventType !== 'todos') {
@@ -83,7 +191,7 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
     }
 
     return filtered;
-  }, [events, eventType, secretaria]);
+  }, [allEvents, eventType, secretaria]);
 
   // Dias com eventos
   const daysWithEvents = useMemo(() => {
@@ -127,15 +235,23 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
     hasEvent: daysWithEvents,
   };
 
-  const modifiersStyles = {
-    hasEvent: {
-      position: 'relative' as const,
-    }
-  };
-
   const modifiersClassNames = {
     hasEvent: 'has-event-day',
   };
+
+  if (loading) {
+    return (
+      <div className="main-screen">
+        <div className="screen-header">
+          <h1 className="screen-title">Calendário de Eventos</h1>
+          <p className="screen-subtitle">Carregando eventos...</p>
+        </div>
+        <div className="flex items-center justify-center p-12">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="main-screen">
@@ -144,6 +260,26 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
         <h1 className="screen-title">Calendário de Eventos</h1>
         <p className="screen-subtitle">Visualize todos os eventos e atrações em um calendário interativo</p>
       </div>
+
+      {/* Status do banco de dados */}
+      {usingDatabase && (
+        <Card className="mb-4 border-l-4 border-l-green-500">
+          <CardContent className="pt-4 pb-4">
+            <p className="text-sm text-muted-foreground">
+              ✅ <strong>Conectado ao banco de dados</strong> - Mostrando {allEvents.length} eventos
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Info sobre projetos */}
+      <Card className="mb-6 border-l-4 border-l-blue-500">
+        <CardContent className="pt-6">
+          <p className="text-sm text-muted-foreground">
+            💡 <strong>Dica:</strong> Os eventos culturais são exibidos neste calendário. Para visualizar projetos conjuntos e suas datas de execução, acesse a seção "Projetos" no menu lateral.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Filtros */}
       <Card className="mb-6">
@@ -261,26 +397,62 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
         <CardHeader>
           <CardTitle>Calendário Mensal</CardTitle>
           <CardDescription>
-            Clique em um dia com eventos (marcado com •) para ver os detalhes
+            Clique em um dia com eventos (marcado com •) para ver os detalhes. {filteredEvents.length} eventos encontrados.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="calendar-wrapper">
             <style>{`
-              .has-event-day::after {
+              .has-event-day {
+                position: relative;
+                font-weight: 700;
+                color: hsl(var(--primary)) !important;
+              }
+              
+              .has-event-day::before {
                 content: '';
                 position: absolute;
-                bottom: 2px;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, rgba(194, 33, 105, 0.15), rgba(194, 33, 105, 0.25));
+                border: 2px solid rgba(194, 33, 105, 0.4);
+                z-index: -1;
+              }
+              
+              .has-event-day::after {
+                content: '•';
+                position: absolute;
+                bottom: 4px;
                 left: 50%;
                 transform: translateX(-50%);
-                width: 4px;
-                height: 4px;
-                border-radius: 50%;
-                background-color: hsl(var(--primary));
+                font-size: 18px;
+                line-height: 1;
+                color: hsl(var(--primary));
+                font-weight: 900;
               }
+              
+              .has-event-day:hover::before {
+                background: linear-gradient(135deg, rgba(194, 33, 105, 0.25), rgba(194, 33, 105, 0.35));
+                border-color: rgba(194, 33, 105, 0.6);
+              }
+              
+              /* Adicionar cursor pointer para dias com eventos */
               .has-event-day {
-                font-weight: 600;
-                position: relative;
+                cursor: pointer !important;
+              }
+              
+              /* Melhorar visualização do dia selecionado */
+              [data-selected="true"] {
+                background-color: hsl(var(--primary)) !important;
+                color: white !important;
+              }
+              
+              [data-selected="true"].has-event-day::before {
+                border-color: white;
               }
             `}</style>
             
@@ -304,14 +476,31 @@ export const CalendarScreen: React.FC<CalendarScreenProps> = ({ events, onEventC
           </div>
 
           {/* Legenda */}
-          <div className="mt-4 flex items-center gap-4 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-primary"></div>
-              <span>Dias com eventos</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-accent"></div>
-              <span>Hoje</span>
+          <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+            <p className="text-sm font-medium mb-3">Legenda do Calendário:</p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <div className="relative w-8 h-8 rounded-full flex items-center justify-center" style={{
+                  background: 'linear-gradient(135deg, rgba(194, 33, 105, 0.15), rgba(194, 33, 105, 0.25))',
+                  border: '2px solid rgba(194, 33, 105, 0.4)'
+                }}>
+                  <span className="text-primary font-bold">15</span>
+                  <span className="absolute bottom-0 text-primary text-lg font-black">•</span>
+                </div>
+                <span><strong>Dias com eventos</strong> - Clique para ver detalhes</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white font-bold">
+                  20
+                </div>
+                <span><strong>Dia selecionado</strong></span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-accent flex items-center justify-center font-bold">
+                  {new Date().getDate()}
+                </div>
+                <span><strong>Hoje</strong></span>
+              </div>
             </div>
           </div>
         </CardContent>

@@ -70,8 +70,8 @@ export const ChatForum: React.FC<ChatForumProps> = ({ currentUser }) => {
 
       if (error) {
         // Se der erro (tabela não existe), usar canais locais
-        console.log('❌ Tabelas do chat não existem no banco. Usando modo local.');
-        toast.warning('⚠️ Configure o banco de dados em "Config. Banco" (menu Admin)', {
+        console.log('❌ Erro ao carregar canais:', error);
+        toast.error('⚠️ Erro ao conectar com o banco de dados. Verifique a configuração.', {
           duration: 5000
         });
         loadLocalChannels();
@@ -79,11 +79,16 @@ export const ChatForum: React.FC<ChatForumProps> = ({ currentUser }) => {
       }
 
       if (data && data.length > 0) {
+        console.log('✅ Canais carregados do banco:', data.length);
         setChannels(data);
         setActiveChannel(data[0]);
+        toast.success('🎉 Chat conectado ao banco de dados!', {
+          duration: 3000
+        });
       } else {
-        // Se não houver canais no banco, usar locais
-        loadLocalChannels();
+        // Se não houver canais no banco, criar os canais padrão
+        console.log('⚠️ Nenhum canal encontrado. Criando canais padrão...');
+        await createDefaultChannels();
       }
     } catch (error) {
       console.error('Erro ao carregar canais:', error);
@@ -93,13 +98,43 @@ export const ChatForum: React.FC<ChatForumProps> = ({ currentUser }) => {
     }
   };
 
+  const createDefaultChannels = async () => {
+    try {
+      // Criar canais padrão no banco
+      const defaultChannels = [
+        { nome: 'geral', descricao: 'Discussões gerais sobre eventos do Recife', tipo: 'geral' },
+        { nome: 'festival-rec-beat', descricao: 'Tudo sobre o Festival Rec-Beat 2025', tipo: 'evento' },
+        { nome: 'projetos-culturais', descricao: 'Discussões sobre projetos conjuntos', tipo: 'projeto' },
+        { nome: 'carnaval-olinda', descricao: 'Planejamento e dicas para o Carnaval', tipo: 'evento' },
+        { nome: 'gastronomia', descricao: 'Eventos gastronômicos e culinária', tipo: 'geral' }
+      ];
+
+      const { error } = await supabase
+        .from('canais_chat')
+        .insert(defaultChannels);
+
+      if (error) {
+        console.error('Erro ao criar canais padrão:', error);
+        toast.error('Erro ao criar canais. Usando modo local.');
+        loadLocalChannels();
+      } else {
+        console.log('✅ Canais padrão criados com sucesso!');
+        // Recarregar canais do banco
+        await loadChannels();
+      }
+    } catch (error) {
+      console.error('Erro ao criar canais padrão:', error);
+      loadLocalChannels();
+    }
+  };
+
   const loadLocalChannels = () => {
     const defaultChannels: Channel[] = [
-      { id: '1', nome: 'geral', descricao: 'Discussões gerais sobre eventos do Recife', tipo: 'geral' },
-      { id: '2', nome: 'festival-rec-beat', descricao: 'Tudo sobre o Festival Rec-Beat 2025', tipo: 'evento' },
-      { id: '3', nome: 'projetos-culturais', descricao: 'Discussões sobre projetos conjuntos', tipo: 'projeto' },
-      { id: '4', nome: 'carnaval-olinda', descricao: 'Planejamento e dicas para o Carnaval', tipo: 'evento' },
-      { id: '5', nome: 'gastronomia', descricao: 'Eventos gastronômicos e culinária', tipo: 'geral' }
+      { id: 'local-1', nome: 'geral', descricao: 'Discussões gerais sobre eventos do Recife', tipo: 'geral' },
+      { id: 'local-2', nome: 'festival-rec-beat', descricao: 'Tudo sobre o Festival Rec-Beat 2025', tipo: 'evento' },
+      { id: 'local-3', nome: 'projetos-culturais', descricao: 'Discussões sobre projetos conjuntos', tipo: 'projeto' },
+      { id: 'local-4', nome: 'carnaval-olinda', descricao: 'Planejamento e dicas para o Carnaval', tipo: 'evento' },
+      { id: 'local-5', nome: 'gastronomia', descricao: 'Eventos gastronômicos e culinária', tipo: 'geral' }
     ];
     setChannels(defaultChannels);
     setActiveChannel(defaultChannels[0]);
@@ -140,50 +175,8 @@ export const ChatForum: React.FC<ChatForumProps> = ({ currentUser }) => {
     e.preventDefault();
     if (!messageInput.trim() || !activeChannel || sending) return;
 
-    setSending(true);
-    try {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        canal_id: activeChannel.id,
-        usuario_id: currentUser.id,
-        usuario_nome: currentUser.name,
-        usuario_avatar: currentUser.avatar,
-        conteudo: messageInput.trim(),
-        criado_em: new Date().toISOString(),
-        fixada: false
-      };
-
-      // Tentar salvar no banco
-      const { error } = await supabase
-        .from('mensagens_chat')
-        .insert({
-          canal_id: activeChannel.id,
-          usuario_id: currentUser.id,
-          usuario_nome: currentUser.name,
-          usuario_avatar: currentUser.avatar,
-          conteudo: messageInput.trim(),
-          fixada: false
-        });
-
-      if (error) {
-        // Se der erro, salvar localmente como fallback
-        const updatedMessages = [...messages, newMessage];
-        setMessages(updatedMessages);
-        localStorage.setItem(`chat_messages_${activeChannel.id}`, JSON.stringify(updatedMessages));
-        toast.error('⚠️ Tabelas do chat não foram criadas! Vá em Config. Banco (menu Admin)', {
-          duration: 5000
-        });
-      } else {
-        // Se salvou no banco, recarregar
-        await loadMessages(activeChannel.id);
-        toast.success('✅ Mensagem enviada e salva no banco de dados!');
-      }
-
-      setMessageInput('');
-    } catch (error) {
-      console.error('Erro ao enviar mensagem:', error);
-      
-      // Salvar localmente como fallback
+    // Verificar se está usando canais locais
+    if (activeChannel.id.startsWith('local-')) {
       const newMessage: Message = {
         id: Date.now().toString(),
         canal_id: activeChannel.id,
@@ -197,8 +190,45 @@ export const ChatForum: React.FC<ChatForumProps> = ({ currentUser }) => {
       const updatedMessages = [...messages, newMessage];
       setMessages(updatedMessages);
       localStorage.setItem(`chat_messages_${activeChannel.id}`, JSON.stringify(updatedMessages));
-      toast.success('Mensagem salva localmente');
+      toast.warning('⚠️ Usando modo local. Configure o banco em "Config. Banco"');
       setMessageInput('');
+      return;
+    }
+
+    setSending(true);
+    try {
+      // Tentar salvar no banco
+      const { data, error } = await supabase
+        .from('mensagens_chat')
+        .insert({
+          canal_id: activeChannel.id,
+          usuario_id: currentUser.id,
+          usuario_nome: currentUser.name,
+          usuario_avatar: currentUser.avatar,
+          conteudo: messageInput.trim(),
+          fixada: false
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('❌ Erro ao salvar mensagem:', error);
+        toast.error(`Erro ao salvar: ${error.message}`, {
+          duration: 5000
+        });
+      } else {
+        console.log('✅ Mensagem salva com sucesso!', data);
+        // Recarregar mensagens
+        await loadMessages(activeChannel.id);
+        toast.success('Mensagem enviada!');
+      }
+
+      setMessageInput('');
+    } catch (error: any) {
+      console.error('Erro ao enviar mensagem:', error);
+      toast.error(`Erro: ${error?.message || 'Erro desconhecido'}`, {
+        duration: 5000
+      });
     } finally {
       setSending(false);
     }

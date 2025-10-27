@@ -4,6 +4,47 @@ Esta pasta contém os scripts SQL para criar as tabelas do banco de dados Supaba
 
 ---
 
+## 🚨 CORREÇÕES URGENTES
+
+### 🔧 Problema 1: Erro ao Criar Roteiros
+
+Execute este comando único:
+
+```sql
+-- CORREÇÃO COMPLETA (RLS + Foreign Key)
+ALTER TABLE roteiros_turisticos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pontos_interesse DISABLE ROW LEVEL SECURITY;
+ALTER TABLE roteiros_turisticos DROP CONSTRAINT IF EXISTS roteiros_turisticos_usuario_criador_fkey;
+ALTER TABLE roteiros_turisticos ADD CONSTRAINT roteiros_turisticos_usuario_criador_fkey FOREIGN KEY (usuario_criador) REFERENCES usuarios(id) ON DELETE CASCADE;
+```
+
+**Erros que isso corrige:**
+- ❌ `violates row-level security policy` 
+- ❌ `violates foreign key constraint`
+- ❌ `Key (...) is not present in table "users"`
+
+📚 Detalhes: `/CORRECAO_ROTEIROS_URGENTE.md`
+
+---
+
+### 🔧 Problema 2: Erro ao Criar Usuários
+
+Execute este comando:
+
+```sql
+-- Corrigir usuários com tipo inválido
+UPDATE usuarios SET tipo = 'cidadao', atualizado_em = NOW()
+WHERE tipo NOT IN ('admin', 'cidadao');
+```
+
+**Erros que isso corrige:**
+- ❌ `violates check constraint "usuarios_tipo_check"`
+- ❌ Formato de data não reconhecido
+
+📚 Detalhes: `/CORRECAO_USUARIOS_TIPO.md`
+
+---
+
 ## 📁 Arquivos Disponíveis
 
 ### 1. `schema-completo.sql` ⭐ **RECOMENDADO**
@@ -35,6 +76,86 @@ Esta pasta contém os scripts SQL para criar as tabelas do banco de dados Supaba
 
 ---
 
+### 3. `schema-roteiros.sql` 🗺️ **ROTEIROS TURÍSTICOS**
+**O que contém:**
+- ✅ Tabela `roteiros_turisticos` - Roteiros temáticos
+- ✅ Tabela `pontos_interesse` - Pontos de cada roteiro
+- ✅ Funções de incremento de visualizações
+- ✅ Triggers automáticos
+- ✅ RLS DESABILITADO (compatível com auth customizada)
+
+**Quando usar:**
+- ✅ Para adicionar funcionalidade de roteiros turísticos (RF10)
+- ✅ Funciona com autenticação customizada da aplicação
+
+**Execute após `schema-completo.sql`**
+
+---
+
+### 4. `funcoes-roteiros.sql` 🔧 **FUNÇÕES DOS ROTEIROS**
+**O que contém:**
+- ✅ `increment_tour_views()` - Contagem de visualizações
+- ✅ `get_tour_statistics()` - Estatísticas gerais
+- ✅ `search_tours()` - Busca de roteiros
+
+**Quando usar:**
+- ✅ Após executar `schema-roteiros.sql`
+- ✅ Adiciona funcionalidades avançadas
+
+---
+
+### 5. `fix-roteiros-rls.sql` 🔧 **CORREÇÃO DE RLS**
+**O que contém:**
+- ✅ Desabilita RLS nas tabelas de roteiros
+- ✅ Remove políticas antigas problemáticas
+- ✅ Script de verificação e teste
+
+**Quando usar:**
+- 🚨 Erro: `violates row-level security policy`
+
+---
+
+### 6. `fix-roteiros-foreign-key.sql` 🔧 **CORREÇÃO DE FOREIGN KEY**
+**O que contém:**
+- ✅ Remove constraint antiga que aponta para `auth.users`
+- ✅ Cria constraint nova que aponta para `usuarios`
+- ✅ Testes de verificação
+
+**Quando usar:**
+- 🚨 Erro: `violates foreign key constraint`
+- 🚨 Erro: `Key (...) is not present in table "users"`
+
+---
+
+### 7. `verificar-roteiros.sql` 🔍 **DIAGNÓSTICO COMPLETO**
+**O que contém:**
+- ✅ Verifica se tabelas existem
+- ✅ Verifica status do RLS
+- ✅ Verifica foreign keys
+- ✅ Verifica estrutura das tabelas
+- ✅ Mostra estatísticas de usuários e roteiros
+- ✅ Lista políticas RLS ativas
+
+**Quando usar:**
+- 🔍 Para diagnosticar qualquer problema
+- 🔍 Para verificar se tudo está configurado corretamente
+- 🔍 Antes de apresentar o projeto
+
+---
+
+### 8. `fix-usuarios-tipo.sql` 🔧 **CORREÇÃO DE TIPOS DE USUÁRIOS**
+**O que contém:**
+- ✅ Lista usuários com tipos inválidos
+- ✅ Corrige tipos diferentes de 'admin' ou 'cidadao'
+- ✅ Converte automaticamente para 'cidadao'
+- ✅ Verifica se a correção funcionou
+
+**Quando usar:**
+- 🚨 Erro: `violates check constraint "usuarios_tipo_check"`
+- 🚨 Usuários não conseguem fazer login
+
+---
+
 ### 2. `chat-tables.sql`
 **O que contém:**
 - ✅ Apenas 2 tabelas: `canais_chat` e `mensagens_chat`
@@ -53,10 +174,22 @@ Esta pasta contém os scripts SQL para criar as tabelas do banco de dados Supaba
 
 ## 🚀 Como Usar
 
+### Setup Inicial Completo (Recomendado)
+
+Execute nesta ordem no SQL Editor do Supabase:
+
+1. **Primeiro**: `schema-completo.sql` (todas as tabelas principais)
+2. **Segundo**: `schema-roteiros.sql` (tabelas de roteiros turísticos)
+3. **Terceiro**: `funcoes-roteiros.sql` (funções dos roteiros)
+
+---
+
 ### Opção 1: Via SQL Editor do Supabase (Recomendado)
 
 1. **Abra o arquivo** que deseja executar:
    - Para sistema completo: `schema-completo.sql`
+   - Para roteiros: `schema-roteiros.sql`
+   - Para funções: `funcoes-roteiros.sql`
    - Para apenas chat: `chat-tables.sql`
 
 2. **Copie TODO o conteúdo** do arquivo (`Ctrl+A` → `Ctrl+C`)
@@ -81,6 +214,24 @@ Esta pasta contém os scripts SQL para criar as tabelas do banco de dados Supaba
 
 ---
 
+### 🚨 Se Tiver Erro ao Criar Roteiros
+
+**Execute a correção completa:**
+
+```sql
+-- CORREÇÃO COMPLETA (RLS + Foreign Key)
+ALTER TABLE roteiros_turisticos DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pontos_interesse DISABLE ROW LEVEL SECURITY;
+ALTER TABLE roteiros_turisticos DROP CONSTRAINT IF EXISTS roteiros_turisticos_usuario_criador_fkey;
+ALTER TABLE roteiros_turisticos ADD CONSTRAINT roteiros_turisticos_usuario_criador_fkey FOREIGN KEY (usuario_criador) REFERENCES usuarios(id) ON DELETE CASCADE;
+```
+
+Ou execute os arquivos:
+- `fix-roteiros-rls.sql` (corrige RLS)
+- `fix-roteiros-foreign-key.sql` (corrige foreign key)
+
+---
+
 ### Opção 2: Via Interface da Aplicação
 
 1. **Faça login** como administrador na aplicação
@@ -96,12 +247,31 @@ Esta pasta contém os scripts SQL para criar as tabelas do banco de dados Supaba
 
 Após executar o script, verifique se funcionou:
 
+### Diagnóstico Completo:
+Execute o script: `verificar-roteiros.sql` para diagnóstico completo
+
+Ou manualmente:
+
 ### No Supabase:
 ```sql
 -- Ver tabelas criadas
 SELECT table_name FROM information_schema.tables 
 WHERE table_schema = 'public' 
 ORDER BY table_name;
+
+-- Verificar RLS dos roteiros
+SELECT tablename, rowsecurity 
+FROM pg_tables 
+WHERE tablename IN ('roteiros_turisticos', 'pontos_interesse');
+-- Resultado esperado: rowsecurity = false ✅
+
+-- Verificar Foreign Key
+SELECT tc.table_name, kcu.column_name, ccu.table_name AS tabela_referenciada
+FROM information_schema.table_constraints tc
+  JOIN information_schema.key_column_usage kcu ON tc.constraint_name = kcu.constraint_name
+  JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_name = 'roteiros_turisticos';
+-- Resultado esperado: tabela_referenciada = usuarios ✅
 
 -- Ver canais criados
 SELECT nome, tipo FROM canais_chat;
@@ -111,6 +281,8 @@ SELECT nome, tipo FROM canais_chat;
 1. Vá em: Admin → Config. Banco
 2. Clique em: **Testar Conexão**
 3. Deve aparecer: "✅ Banco de dados configurado com sucesso!"
+4. Tente criar um roteiro turístico
+5. Deve funcionar sem erros! ✅
 
 ---
 
